@@ -2,3 +2,5 @@
 .Rhistory
 .RData
 .Ruserdata
+data/myG_ACT197_filtered.hmp.txt
+data/myG_subset_100.hmp.txt
