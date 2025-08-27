@@ -117,7 +117,7 @@ for (env in envs) {
     preds_geno <- tryCatch(
       predict(fit, which = "Lentil", predFixed = "marginal"),
       error = function(e) {
-        warning("predict(..., which='geno') failed for ", env, " - ", trait, ": ", e$message)
+        warning("predict(..., which='Lentil') failed for ", env, " - ", trait, ": ", e$message)
         return(NULL)
       }
     )
@@ -166,7 +166,6 @@ write.csv(genotype_means_and_blups, "genotype_means_and_blups.csv", row.names = 
 # Quick look
 head(spatial_variation_lentil)
 head(genotype_means_and_blups)
-
 
 #heat maps based on SpATS trends
 # Load required libraries
