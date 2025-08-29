@@ -41,16 +41,44 @@ is_ordered(folder = "GWAS_results/")
 order_GWAS_Results(folder = "GWAS_results/")
 
 # Create summary of GWAS results
-xx <- table_GWAS_Results(folder = "GWAS_results/", 
+xx <- table_GWAS_Results_2(folder = "GWAS_results/", 
                          threshold = 6.8, 
                          sug.threshold = 5.3)
+
+write.csv(xx, "Supplemtnal_Table_01.csv", row.names = F)
+
+gg_GWAS_Summary(folder = "GWAS_results/")
+
+#threshold
+-log10( 0.05 / (nrow(myG)-1) )
 
 # Plot
 mp <- gg_Manhattan_2(
   # Specify a folder with GWAS results
   folder = "GWAS_results/", 
   # Select a trait to plot
-  trait = "Clavet_2025_lodging",
-  threshold = 6.5
+  trait = "Clavet_2025_DTF",
+  threshold = 6.5,
+  sug.threshold = 5.3
 )
-ggsave(path = "GWAS_results/","Fig_Clavet2025_lodging.png", mp, width = 12, height = 4, bg = "white")
+
+ggsave(path = "GWAS_results/","Fig_Clavet2025_DTF.png", mp, width = 12, height = 4, bg = "white")
+
+# marker box plots
+#change column name
+colnames(myY_SpATS)[colnames(myY_SpATS) == 'Lentil_SNP'] <- 'Name'
+
+mp <- gg_Marker_Box_2(
+  # Genotype data
+  xG = myG,
+  # Phenotype data
+  xY = myY_SpATS, 
+  # Select a trait to plot
+  traits = "Hunter_2025_lodging",
+  # Select markers to plot
+  markers = "Lcu.1GRN.Chr3p269626642",
+  # Specify colors for alleles
+  marker.colors = c("darkgoldenrod3","darkgreen") 
+)
+# Save
+ggsave("Fig_Clavet_2025_DTF.png", mp, width = 6, height = 4)
