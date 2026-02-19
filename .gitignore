@@ -2,6 +2,5 @@
 .Rhistory
 .RData
 .Ruserdata
-data/myG_ACT197_filtered.hmp.txt
-data/myG_ACT100_filtered.hmp.txt
 GWAS_results/
+data/

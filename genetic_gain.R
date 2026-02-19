@@ -3,25 +3,23 @@
  #BLUPs from SpATS package
 library(readr)
 myY <- read.csv("data/lentil_blups_wide_spats.csv")
-
+myY_sub <- read.csv("data/lentil_sub_blups_wide_spats.csv")
 #plot genetic gain
+install.packages("vctrs")
 library(ggplot2)
 library(tidyr)
 library(dplyr)
 library(ggpubr) # Essential for adding P-values/R2 easily
 
-# 1. SETUP & DUMMY DATA
-set.seed(123)
-df <- myY
+# 1. SETUP
+df <- myY_sub
 
 # 2. DATA WRANGLING
-# Goal: Convert "Hunter2024_YLD" columns into distinct "Environment" and "YLD" columns
+trait_of_interest <- "PRT"
 
-trait_of_interest <- "VegP"
-
-plot_data <- df %>%
+plot_data <- df |>
   # 1. Select ID, metadata, and columns containing the specific trait
-  select(Genotype, dev_year, cot_color, ends_with(trait_of_interest)) %>%
+  select(Genotype, dev_year, cot_color, ends_with(trait_of_interest)) |>
   
   # 2. Pivot to Long Format
   # names_pattern regex explained: "(.*)_(.*)" captures (Env)_(Trait)
