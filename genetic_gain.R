@@ -5,23 +5,25 @@ library(readr)
 myY <- read.csv("data/lentil_blups_wide_spats.csv")
 myY_sub <- read.csv("data/lentil_sub_blups_wide_spats.csv")
 #plot genetic gain
-install.packages("vctrs")
+#install.packages("vctrs")
+#install.packages("gander")
+library(gander)
 library(ggplot2)
 library(tidyr)
 library(dplyr)
 library(ggpubr) # Essential for adding P-values/R2 easily
 
 # 1. SETUP
-df <- myY_sub
+df <- myY
 
 # 2. DATA WRANGLING
-trait_of_interest <- "PRT"
+trait_of_interest <- "YLD"
 
 plot_data <- df |>
-  # 1. Select ID, metadata, and columns containing the specific trait
+  # Select ID, metadata, and columns containing the specific trait
   select(Genotype, dev_year, cot_color, ends_with(trait_of_interest)) |>
   
-  # 2. Pivot to Long Format
+  # Pivot to Long Format
   # names_pattern regex explained: "(.*)_(.*)" captures (Env)_(Trait)
   pivot_longer(
     cols = ends_with(trait_of_interest),
@@ -78,4 +80,4 @@ ggplot(plot_data, aes(x = dev_year, y = BLUP_Value, color = cot_color)) +
     legend.position = "none"
   )
 
-ggsave(paste("Predicted mean","_", trait_of_interest,".png", sep=""), width = 10, height = 7, bg = "white")
+ggsave(paste("Predicted mean","_", trait_of_interest,".png", sep=""), width = 10, height = 5, bg = "white")
