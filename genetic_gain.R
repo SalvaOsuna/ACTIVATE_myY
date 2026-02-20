@@ -7,7 +7,7 @@ myY_sub <- read.csv("data/lentil_sub_blups_wide_spats.csv")
 #plot genetic gain
 #install.packages("vctrs")
 #install.packages("gander")
-library(gander)
+#library(gander)
 library(ggplot2)
 library(tidyr)
 library(dplyr)
@@ -17,7 +17,7 @@ library(ggpubr) # Essential for adding P-values/R2 easily
 df <- myY
 
 # 2. DATA WRANGLING
-trait_of_interest <- "YLD"
+trait_of_interest <- "DS"
 
 plot_data <- df |>
   # Select ID, metadata, and columns containing the specific trait
