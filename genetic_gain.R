@@ -17,7 +17,7 @@ library(ggpubr) # Essential for adding P-values/R2 easily
 df <- myY
 
 # 2. DATA WRANGLING
-trait_of_interest <- "DS"
+trait_of_interest <- "PRT"
 
 plot_data <- df |>
   # Select ID, metadata, and columns containing the specific trait
