@@ -14,10 +14,10 @@ library(dplyr)
 library(ggpubr) # Essential for adding P-values/R2 easily
 
 # 1. SETUP
-df <- myY
+df <- myY_sub
 
 # 2. DATA WRANGLING
-trait_of_interest <- "PRT"
+trait_of_interest <- "NHI.pct"
 
 plot_data <- df |>
   # Select ID, metadata, and columns containing the specific trait
