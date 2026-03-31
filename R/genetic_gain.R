@@ -362,7 +362,7 @@ H2_master <- bind_rows(lapply(results_list, function(x) x$H2_table))
 cat("\n\n══ H² SUMMARY TABLE ══\n")
 print(H2_master)
 write.csv(H2_master, "Results/H2_comparison_SpATS_vs_GIBD.csv", row.names = FALSE)
-
+H2_master <- read.csv("Results/H2_comparison_SpATS_vs_GIBD.csv")
 
 # ── 6. SELECT BEST MODEL PER TRAIT × ENVIRONMENT ─────────────────────────────
 # Criterion: higher Cullis H² → better model
@@ -383,7 +383,7 @@ best_model_selection <- H2_master %>%
 cat("\n══ BEST MODEL SELECTION ══\n")
 print(best_model_selection %>% select(trait, env, H2_SpATS, H2_GIBD, delta_H2, best_model))
 write.csv(best_model_selection, "Results/best_model_selection.csv", row.names = FALSE)
-
+best_model_selection<- read.csv("Results/best_model_selection.csv")
 
 # ── 7. STAGE 2: MULTI-ENVIRONMENT BLUPs (Best-model BLUPs) ───────────────────
 # Combine best-model BLUPs across environments using a second-stage mixed model
@@ -442,7 +442,7 @@ combined_blups <- combined_blups %>%
   left_join(dev_year_df, by = "genotype")
 
 write.csv(combined_blups, "Results/combined_BLUPs_best_model.csv", row.names = FALSE)
-
+combined_blups <- read.csv("Results/combined_BLUPs_best_model.csv")
 
 # ── 8. GENETIC GAIN REGRESSION ────────────────────────────────────────────────
 # Regress combined BLUPs on release year per trait
@@ -475,7 +475,7 @@ genetic_gain_results <- combined_blups %>%
 cat("\n══ GENETIC GAIN ESTIMATES ══\n")
 print(genetic_gain_results)
 write.csv(genetic_gain_results, "Results/genetic_gain_estimates.csv", row.names = FALSE)
-
+genetic_gain_results <- read.csv("Results/genetic_gain_estimates.csv")
 
 # ── 9. VISUALIZATION ──────────────────────────────────────────────────────────
 
@@ -586,13 +586,13 @@ ggsave("Results/plot_genetic_gain.png", p_gain, width = 12, height = 7, dpi = 30
 
 # ── 9e. SpATS spatial trend map for each environment (first trait) ────────────
 # Run separately for each environment — example for first trait & first env
-env1    <- envs[1]
-trait1  <- traits[1]
+env1    <- envs[2]
+trait1  <- traits[7]
 d_env1  <- dat %>% filter(env == env1) %>% droplevels()
 mod_sp1 <- fit_SpATS_env(d_env1, trait1)
 
 if (!is.null(mod_sp1)) {
-  png("plot_SpATS_spatial_trend_env1.png", width = 1800, height = 1200, res = 200)
+  png("Results/plot_SpATS_spatial_trend_env1.png", width = 1800, height = 1200, res = 200)
   plot(mod_sp1, main = paste("SpATS Spatial Trend —", env1, "|", trait1))
   dev.off()
 }
