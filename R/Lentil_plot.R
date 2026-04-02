@@ -13,10 +13,10 @@ library(dplyr)
 library(ggpubr) # Essential for adding P-values/R2 easily
 
 # 1. SETUP
-df <- myY_sub
+df <- myY
 
 # 1. Define the trait you want to plot
-target_trait <- "C.N.ratio.stover"
+target_trait <- "YLD"
 
 # 2. Prepare the data (Wide to Long)
 plot_data <- df %>%

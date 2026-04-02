@@ -163,9 +163,7 @@ cat("Environments detected:", paste(envs, collapse = ", "), "\n")
 cat("Traits to analyze:    ", paste(traits, collapse = ", "), "\n")
 cat("Number of genotypes:  ", nlevels(dat$genotype), "\n")
 
-
 # ── 2. HELPER FUNCTIONS ───────────────────────────────────────────────────────
-
 # ── 2a. Cullis et al. (2006) entry-mean heritability ─────────────────────────
 # H² = 1 − (mean pairwise PEV) / (2 * σ²g)
 # Works for both SpATS and lme4 BLUPs
@@ -210,7 +208,6 @@ cullis_H2_SpATS <- function(spats_model) {
   return(list(H2 = H2, sigma2g = sigma2g, mean_pev = mean_pev))
 }
 
-
 # ── 3. MODEL FITTING: SpATS PER ENVIRONMENT ───────────────────────────────────
 # SpATS fits: y = μ + Genotype + f(row, col) + Rep + ε
 # Genotype is fitted as random to obtain BLUPs
@@ -247,7 +244,6 @@ fit_SpATS_env <- function(data_env, trait) {
     return(NULL)
   })
 }
-
 
 # ── 4. MODEL FITTING: GIBD (lme4) PER ENVIRONMENT ─────────────────────────────
 # y_ijk = μ + Genotype_i + Rep_j + Block_k(Rep_j) + ε_ijk
@@ -315,7 +311,13 @@ for (tr in traits) {
     if (!is.null(mod_gi)) {
       h2_gi  <- cullis_H2_lme4(mod_gi, "genotype")
       re_gi  <- ranef(mod_gi)$genotype
-      blups_gi <- setNames(re_gi[, 1], rownames(re_gi))
+      
+      #Calculate the grand mean of the trait for this specific environment
+      grand_mean <- mean(d_env[[tr]], na.rm = TRUE)
+      
+      #Add the grand mean to the random deviations to get predicted means
+      blups_gi <- setNames(re_gi[, 1] + grand_mean, rownames(re_gi))
+      
       blups_GIBD_list[[env]] <- data.frame(
         genotype = names(blups_gi),
         BLUP     = as.numeric(blups_gi),
@@ -356,6 +358,11 @@ for (tr in traits) {
     blups_GIBD   = bind_rows(blups_GIBD_list)
   )
 }
+blups_SpATS_all <- bind_rows(lapply(results_list, function(x) x$blups_SpATS))
+blups_GIBD_all <- bind_rows(lapply(results_list, function(x) x$blups_GIBD))
+
+write.csv(blups_SpATS_all, "Results/blups_SpATS_all.csv", row.names = FALSE)
+write.csv(blups_GIBD_all, "Results/blups_GIBD_all.csv", row.names = FALSE)
 
 # ── Compile master H² summary table ------------------------------------------
 H2_master <- bind_rows(lapply(results_list, function(x) x$H2_table))
@@ -395,10 +402,19 @@ fit_stage2 <- function(blup_df, trait_name) {
     mod2 <- lmer(BLUP ~ (1 | genotype) + env,
                  data    = blup_df,
                  control = lmerControl(optimizer = "bobyqa"))
+    
+    # Extract the random deviations for the genotypes
     re   <- ranef(mod2)$genotype
+    
+    # [NEW] Calculate the grand mean of the trait across all environments
+    grand_mean <- mean(blup_df$BLUP, na.rm = TRUE)
+    
+    # [NEW] Add the grand mean to the deviations to get the predicted mean BLUPs
+    predicted_means <- re[, 1] + grand_mean
+    
     blups_combined <- data.frame(
       genotype      = rownames(re),
-      BLUP_combined = re[, 1],
+      BLUP_combined = predicted_means,
       trait         = trait_name
     )
     return(blups_combined)
@@ -439,7 +455,7 @@ dev_year_df <- myY %>%
   distinct()
 
 combined_blups <- combined_blups %>%
-  left_join(dev_year_df, by = "genotype")
+  inner_join(dev_year_df, by = "genotype")
 
 write.csv(combined_blups, "Results/combined_BLUPs_best_model.csv", row.names = FALSE)
 combined_blups <- read.csv("Results/combined_BLUPs_best_model.csv")
@@ -545,12 +561,12 @@ p_rho <- all_blups_wide %>%
   ggplot(aes(x = SpATS, y = GIBD)) +
   geom_point(alpha = 0.5, size = 1.2, color = "#444444") +
   geom_smooth(method = "lm", se = TRUE, color = "#2C7BB6", linewidth = 0.8) +
-  facet_grid(trait ~ env, scales = "free") +
-  stat_cor(method = "spearman", label.x.npc = 0.05, label.y.npc = 0.92,
+  facet_wrap(trait ~ env, scales = "free") +
+  stat_cor(method = "pearson", label.x.npc = 0.05, label.y.npc = 0.92,
            size = 3, color = "firebrick") +
   labs(
     title    = "BLUP Concordance: SpATS vs. GIBD",
-    subtitle = "Spearman ρ per trait × environment",
+    subtitle = "Pearson ρ per trait × environment",
     x        = "BLUP (SpATS)", y = "BLUP (GIBD)"
   ) +
   theme_bw(base_size = 10) +
