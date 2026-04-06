@@ -15,55 +15,153 @@ dir.create("Results", showWarnings = FALSE)
 traits <- c("DTE",	"DTF",	"VegP",	"DTM",	"RepP",	"lodging",	"YLD",	"PRT",	"DS")
 envs   <- c("Clavet.2024","Clavet.2025","Hunter.2024","Hunter.2025")
 env_colors <- c("Clavet.2024"="#2C7BB6","Clavet.2025"="#74ADD1",
-                "Hunter.2024"="#D7191C","Hunter.2025"="#FDAE61")
+                "Hunter.2024"="#D7191C","Hunter.2025"="#F77964")
 
 # =============================================================================
 # SECTION 3.1 — ENVIRONMENTAL CHARACTERISATION & CLIMATE VARIATION
 # =============================================================================
 
-# ── Fig 3.1a: Climate covariate summary heatmap (phase × covariate × env) ----
-# Load covariate data produced by gxe_enviromics_analysis.R
-cov_long <- read.csv("Results/climate_covariates_by_phase.csv")
+# ── Fig 3.1a: Climate covariate summary heatmap — actual growing season -------
+# Covariates are computed for the sowing-to-harvest window per environment,
+# using field-observed phenological dates rather than the calendar full_season.
 
-# Select full-season covariates for the summary panel
-cov_season <- cov_long %>%
-  filter(phase == "full_season") %>%
-  pivot_longer(cols = c(GDD, precip_total, mean_rad, VPD,
-                        heat_days, frost_days, dtr, tmean),
-               names_to = "covariate", values_to = "value") %>%
+# Actual phenological windows from field observations
+pheno_windows <- data.frame(
+  site       = c("Clavet", "Clavet", "Hunter", "Hunter"),
+  trial_year = c(2024,     2025,     2024,     2025),
+  sowing     = as.Date(c("2024-05-15","2025-05-05",
+                         "2024-05-28","2025-05-12")),
+  harvest    = as.Date(c("2024-08-26","2025-08-29",
+                         "2024-09-09","2025-09-13")),
+  Avg_DTE    = c(12.75, 14.77, 16.01, 11.11),
+  Avg_DTF    = c(47.48, 53.37, 53.94, 55.34),
+  Avg_DTM    = c(81.56, 87.07, 93.77, 95.00)
+) %>%
+  mutate(
+    emergence = as.Date(sowing + Avg_DTE),
+    flowering = as.Date(sowing + Avg_DTF),
+    maturity  = as.Date(sowing + Avg_DTM),
+    env       = paste(site, trial_year, sep = ".")
+  ) %>%
+  select(-Avg_DTE, -Avg_DTF, -Avg_DTM)
+
+# Load daily climate data (output from gxe_enviromics_analysis.R)
+climate_daily <- read.csv("Results/climate_daily_NASA_POWER.csv") %>%
+  mutate(
+    date = as.Date(as.character(YYYYMMDD)),
+    env  = paste(site, trial_year, sep = ".")
+  )
+
+# Helper: compute covariates for a date window within one environment
+compute_gs_covariates <- function(clim_env, start_date, end_date,
+                                  T_base = 5) {
+  d <- clim_env %>%
+    filter(date >= start_date & date <= end_date)
+  if (nrow(d) == 0) return(NULL)
+  
+  GDD          <- sum(pmax((d$T2M_MAX + d$T2M_MIN) / 2 - T_base, 0),
+                      na.rm = TRUE)
+  precip_total <- sum(d$PRECTOTCORR, na.rm = TRUE)
+  mean_rad     <- mean(d$ALLSKY_SFC_SW_DWN, na.rm = TRUE)
+  
+  es_max <- 0.6108 * exp(17.27 * d$T2M_MAX / (d$T2M_MAX + 237.3))
+  es_min <- 0.6108 * exp(17.27 * d$T2M_MIN / (d$T2M_MIN + 237.3))
+  ea     <- ((es_max + es_min) / 2) * (d$RH2M / 100)
+  VPD    <- mean((es_max + es_min) / 2 - ea, na.rm = TRUE)
+  
+  heat_days  <- sum(d$T2M_MAX > 30,  na.rm = TRUE)
+  frost_days <- sum(d$T2M_MIN < 0,   na.rm = TRUE)
+  dtr        <- mean(d$T2M_MAX - d$T2M_MIN, na.rm = TRUE)
+  tmean      <- mean(d$T2M,     na.rm = TRUE)
+  
+  data.frame(GDD, precip_total, mean_rad, VPD,
+             heat_days, frost_days, dtr, tmean)
+}
+
+# Compute growing-season covariates for each environment
+gs_covariates <- purrr::map_dfr(seq_len(nrow(pheno_windows)), function(i) {
+  pw  <- pheno_windows[i, ]
+  cdf <- climate_daily %>% filter(env == pw$env)
+  cov <- compute_gs_covariates(cdf, pw$sowing, pw$harvest)
+  if (is.null(cov)) return(NULL)
+  cov$env        <- pw$env
+  cov$site       <- pw$site
+  cov$trial_year <- pw$trial_year
+  cov$gs_days    <- as.integer(pw$harvest - pw$sowing)   # season length
+  cov
+})
+
+write.csv(gs_covariates,
+          "Results/climate_covariates_growing_season.csv",
+          row.names = FALSE)
+
+# Pivot to long and scale for heatmap
+covariate_labels <- c(
+  "GDD"          = "GDD (\u00B0C\u00B7d)",
+  "precip_total" = "Precipitation (mm)",
+  "mean_rad"     = "Solar Rad. (MJ m\u207B\u00B2)",
+  "VPD"          = "VPD (kPa)",
+  "heat_days"    = "Heat stress days (>30\u00B0C)",
+  "frost_days"   = "Frost days (<0\u00B0C)",
+  "dtr"          = "Diurnal T range (\u00B0C)",
+  "tmean"        = "Mean temperature (\u00B0C)",
+  "gs_days"      = "Growing season length (d)"
+)
+
+cov_season <- gs_covariates %>%
+  pivot_longer(cols      = names(covariate_labels),
+               names_to  = "covariate",
+               values_to = "value") %>%
   group_by(covariate) %>%
   mutate(z = as.numeric(scale(value))) %>%
   ungroup() %>%
   mutate(
-    covariate = recode(covariate,
-                       "GDD"         = "GDD (°C·d)",
-                       "precip_total"= "Precipitation (mm)",
-                       "mean_rad"    = "Solar Rad. (MJ m⁻²)",
-                       "VPD"         = "VPD (kPa)",
-                       "heat_days"   = "Heat stress days",
-                       "frost_days"  = "Frost days",
-                       "dtr"         = "Diurnal T range (°C)",
-                       "tmean"       = "Mean temp (°C)"
-    ),
-    env = factor(env, levels = envs)
+    covariate = recode(covariate, !!!covariate_labels),
+    covariate = factor(covariate, levels = covariate_labels),
+    env       = factor(env, levels = envs),
+    # Format label: integers for counts/days, 1 decimal for continuous
+    label = ifelse(
+      covariate %in% c("Heat stress days (>30\u00B0C)",
+                       "Frost days (<0\u00B0C)",
+                       "Growing season length (d)"),
+      as.character(round(value, 0)),
+      as.character(round(value, 1))
+    )
   )
 
 p_clim_heat <- ggplot(cov_season,
-                      aes(x = env, y = covariate, fill = z)) +
-  geom_tile(color = "white", linewidth = 0.6) +
-  geom_text(aes(label = round(value, 1)), size = 3) +
-  scale_fill_gradient2(low = "#D7191C", mid = "white", high = "#2C7BB6",
-                       midpoint = 0, name = "Z-score") +
+                      aes(x = env, y = fct_rev(covariate), fill = z)) +
+  geom_tile(color = "white", linewidth = 0.7) +
+  geom_text(aes(label = label,
+                color  = abs(z) > 0.8),   # white text on saturated cells
+            size = 3.2, fontface = "bold", show.legend = FALSE) +
+  scale_fill_gradient2(
+    low      = "#D7191C",
+    mid      = "white",
+    high     = "#2C7BB6",
+    midpoint = 0,
+    name     = "Z-score"
+  ) +
+  scale_color_manual(values = c("FALSE" = "grey20", "TRUE" = "grey20")) +
   scale_x_discrete(position = "top") +
-  labs(title    = "Full-season climate covariates by environment",
-       subtitle = "Cell values = raw; colour = standardised Z-score",
-       x = NULL, y = NULL) +
-  theme_bw(base_size = 11) +
-  theme(axis.text.x   = element_text(angle = 30, hjust = 0, face = "bold"),
-        panel.grid    = element_blank(),
-        plot.title    = element_text(face = "bold"))
+  labs(
+    #title    = "Growing-season climate covariates by environment",
+    #subtitle = paste0("Sowing to harvest window per site \u00D7 year | ",
+    #                  "Cell values = raw; colour = Z-score across environments"),
+    x = NULL, y = NULL
+  ) +
+  theme_bw(base_size = 10) +
+  theme(
+    axis.text.x  = element_text(angle = 30, hjust = 0, face = "bold"),
+    axis.text.y  = element_text(face = "bold"),
+    panel.grid   = element_blank(),
+    plot.title   = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
 ggsave("Results/Fig3.1a_climate_covariate_heatmap.png",
-       p_clim_heat, width = 8, height = 6, dpi = 300)
+       p_clim_heat, width = 9, height = 6.5, dpi = 300)
+cat("Fig 3.1a saved — growing-season climate heatmap\n")
 
 # ── Fig 3.1b: W matrix (upper triangle, ggplot2) ------------------------------
 W_matrix <- as.matrix(read.csv("Results/W_environmental_kinship.csv",
@@ -77,17 +175,17 @@ W_long <- as.data.frame(W_matrix) %>%
          ci   = as.integer(env2)) %>%
   filter(ci >= ri)
 
-p_W <- ggplot(W_long, aes(x = env2, y = fct_rev(env1), fill = w)) +
+p_W_2 <- ggplot(W_long, aes(x = env2, y = fct_rev(env1), fill = w)) +
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = round(w, 3)), size = 4, fontface = "bold") +
+  geom_text(aes(label = round(w, 3)), size = 3.2, fontface = "bold") +
   scale_fill_gradient2(low = "#D7191C", mid = "white", high = "#2C7BB6",
                        midpoint = 0, limits = c(-1, 1),
                        oob = squish, name = "Kinship (W)") +
   scale_x_discrete(position = "top") +
-  labs(title    = "Environmental kinship matrix (W)",
-       subtitle = "Derived from 28 standardised climate covariates",
+  labs(#title    = "Environmental kinship matrix (W)",
+       #subtitle = "Derived from 28 standardised climate covariates",
        x = NULL, y = NULL) +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 10) +
   theme(axis.text.x  = element_text(angle = 30, hjust = 0, face = "bold"),
         axis.text.y  = element_text(face = "bold"),
         panel.grid   = element_blank(),
@@ -114,7 +212,7 @@ var_loads <- as.data.frame(env_pca$rotation[, 1:2]) %>%
   rownames_to_column("variable") %>%
   mutate(PC1s = PC1 * scale_f, PC2s = PC2 * scale_f,
          mag  = sqrt(PC1^2 + PC2^2)) %>%
-  slice_max(mag, n = 20) %>%
+  slice_max(mag, n = 15) %>%
   mutate(label = str_replace_all(variable, "_", " "))
 
 p_pca <- ggplot() +
@@ -131,18 +229,25 @@ p_pca <- ggplot() +
              aes(x = PC1, y = PC2, color = env), size = 6) +
   geom_text_repel(data = env_scores,
                   aes(x = PC1, y = PC2, label = env, color = env),
-                  fontface = "bold", size = 4, box.padding = 0.5) +
+                  fontface = "bold", size = 3.2, box.padding = 0.5) +
   scale_color_manual(values = env_colors, guide = "none") +
-  labs(title = "Environment PCA — climate covariates",
+  labs(#title = "Environment PCA — climate covariates",
        x = paste0("PC1 (", pct_var[1], "%)"),
        y = paste0("PC2 (", pct_var[2], "%)")) +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 10) +
   theme(plot.title = element_text(face = "bold"))
 ggsave("Results/Fig3.1c_environment_PCA.png", p_pca,
        width = 8, height = 6, dpi = 300)
 
 cat("Section 3.1 figures saved\n")
 
+#combine figures together
+Fig1 <- (p_clim_heat | (p_W / p_W_2)) / p_pca+ 
+  plot_layout(tag_level = 'new', heights = unit(c(9, 7), c('cm', 'cm'))) +
+  plot_annotation(tag_levels = list(c('a)', 'b)', 'c)', 'd)')))
+
+ggsave("Figures/Fig1_ENVIRONMENTAL CHARACTERISATION & CLIMATE VARIATION.png", Fig1,
+       width = 8.5, height = 8, dpi = 600)
 
 # =============================================================================
 # SECTION 3.2 — SPATIAL VARIATION & MODEL COMPARISON
@@ -235,7 +340,7 @@ p_rho <- ggplot(blups_wide, aes(x = BLUP_SpATS, y = BLUP_GIBD)) +
             aes(label = label, x = -Inf, y = Inf),
             hjust = -0.1, vjust = 1.4, size = 2.6,
             color = "firebrick", inherit.aes = FALSE) +
-  facet_grid(trait ~ env, scales = "free") +
+  ggh4x::facet_grid2(trait ~ env, scales = "free", independent = "all") +
   labs(title = "BLUP concordance: SpATS vs. GIBD",
        x = "BLUP (SpATS)", y = "BLUP (GIBD)") +
   theme_bw(base_size = 9) +
@@ -282,6 +387,7 @@ dat <- dat %>%
   )
 
 # ── Table 3.3: Descriptive statistics per trait × environment ----------------
+library(moments)
 desc_stats <- dat %>%
   pivot_longer(cols = all_of(traits), names_to = "trait",
                values_to = "value") %>%
@@ -294,6 +400,8 @@ desc_stats <- dat %>%
     cv   = round(sd(value) / mean(value) * 100, 1),
     min  = round(min(value), 2),
     max  = round(max(value), 2),
+    skewness = round(skewness(value),2),
+    kurtosis= round(kurtosis(value), 2),
     .groups = "drop"
   )
 write.csv(desc_stats, "Results/Table3.3_descriptive_stats.csv",
@@ -314,13 +422,13 @@ p_violin <- dat %>%
   scale_fill_manual(values = env_colors, name = "Environment") +
   labs(title = "Phenotypic distribution per trait and environment",
        x = NULL, y = "Phenotypic value") +
-  theme_bw(base_size = 10) +
-  theme(axis.text.x      = element_text(angle = 35, hjust = 1, size = 7),
+  theme_bw(base_size = 12) +
+  theme(axis.text.x      = element_text(angle = 35, hjust = 1, size = 9),
         strip.background = element_rect(fill = "#F0F0F0"),
-        legend.position  = "top",
+        legend.position  = "none",
         plot.title       = element_text(face = "bold"))
 ggsave("Results/Fig3.3a_trait_distributions.png", p_violin,
-       width = 13, height = 10, dpi = 300)
+       width = 13, height = 10, dpi = 600)
 
 # ── Fig 3.3b: Phenotypic correlation heatmap (grand means across envs) -------
 trait_means <- dat %>%
@@ -348,18 +456,27 @@ p_cor <- ggplot(cor_long, aes(x = t2, y = fct_rev(t1), fill = r)) +
   scale_color_manual(values = c("FALSE" = "grey50", "TRUE" = "black"),
                      guide = "none") +
   scale_x_discrete(position = "top") +
-  labs(title    = "Phenotypic correlations among traits",
-       subtitle = "Based on genotype means across all environments",
+  labs(#title    = "Phenotypic correlations among traits",
+       #subtitle = "Based on genotype means across all environments",
        x = NULL, y = NULL) +
   theme_bw(base_size = 11) +
   theme(axis.text.x  = element_text(angle = 30, hjust = 0, face = "bold"),
         panel.grid   = element_blank(),
-        plot.title   = element_text(face = "bold"))
+        plot.title   = element_text(face = "bold"),legend.position = "none")
 ggsave("Results/Fig3.3b_phenotypic_correlations.png", p_cor,
-       width = 7, height = 6, dpi = 300)
+       width = 7, height = 6, dpi = 600)
 
 cat("Section 3.3 figures saved\n")
 
+#combine figures together
+Fig3 <- p_violin + p_cor+ 
+  plot_layout(tag_level = 'new',widths = c(1.5, 1)) +
+  plot_annotation(tag_levels = list(c('a)', 'b)'))) & 
+  theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 2, unit = "pt"))
+
+
+ggsave("Figures/Fig3_trait variation.png", Fig3,
+       width = 9, height = 5, dpi = 600)
 
 # =============================================================================
 # SECTION 3.4 — GENOTYPE × ENVIRONMENT INTERACTION
@@ -379,7 +496,7 @@ blups_long <- read.csv("Results/blups_SpATS_all.csv") %>%
             by = c("trait","env","model" = "best_model"))
 
 for (tr in traits) {
-  mat <- blups_best_long %>%
+  mat <- blups_long %>%
     filter(trait == tr) %>%
     inner_join(release_yr, by = "genotype") %>%
     arrange(dev_year) %>%
@@ -393,7 +510,7 @@ for (tr in traits) {
     rownames_to_column("genotype") %>%
     pivot_longer(-genotype, names_to = "env", values_to = "z_BLUP") %>%
     left_join(release_yr, by = "genotype") %>%
-    mutate(genotype = reorder(genotype, release_yr))
+    mutate(genotype = reorder(genotype, dev_year))
   
   p_hm <- ggplot(mat_long,
                  aes(x = env, y = genotype, fill = z_BLUP)) +
@@ -413,29 +530,68 @@ for (tr in traits) {
 }
 
 # ── Fig 3.4b: Finlay-Wilkinson b distribution per trait ----------------------
+# Traits where all environments produced nearly identical means (SD of I_j
+# below the min_Ij_sd threshold) return NULL from finlay_wilkinson() and are
+# excluded from the plot with a diagnostic message.
+
 fw_all <- read.csv("Results/FW_stability_all_traits.csv") %>%
-  filter(trait %in% traits) %>%
+  filter(trait %in% traits,
+         b_class != "Unreliable",    # drop numerical artefacts (|b| > 10)
+         !is.na(b)) %>%
   mutate(trait = factor(trait, levels = traits))
 
-p_fw <- ggplot(fw_all, aes(x = b, fill = b_class)) +
-  geom_histogram(bins = 20, color = "white", linewidth = 0.3) +
-  geom_vline(xintercept = 1, linetype = "dashed",
-             color = "grey30", linewidth = 0.7) +
-  facet_wrap(~ trait, scales = "free", nrow = 3) +
-  scale_fill_manual(
-    values = c("Stable / low-input adapted"     = "#2C7BB6",
-               "Average stability"               = "#FFFFBF",
-               "Responsive / high-input adapted" = "#D7191C"),
-    name = "Stability class") +
-  labs(title    = "Finlay-Wilkinson regression slope distribution",
-       subtitle = "Dashed line = b = 1 (average stability)",
-       x = "Regression slope (b)", y = "Count") +
-  theme_bw(base_size = 10) +
-  theme(strip.background = element_rect(fill = "#F0F0F0"),
-        legend.position  = "top",
-        plot.title       = element_text(face = "bold"))
-ggsave("Results/Fig3.4b_FW_slope_distribution.png", p_fw,
-       width = 12, height = 9, dpi = 300)
+# Report which traits were dropped
+skipped <- setdiff(traits, unique(as.character(fw_all$trait)))
+if (length(skipped) > 0)
+  cat("FW plot — traits skipped (negligible environment index variance):\n  ",
+      paste(skipped, collapse = ", "), "\n")
+
+# Only plot traits that have valid slopes
+fw_plot_traits <- intersect(traits, unique(as.character(fw_all$trait)))
+
+if (length(fw_plot_traits) == 0) {
+  cat("No traits with valid FW slopes — skipping Fig 3.4b\n")
+} else {
+  fw_plot <- fw_all %>%
+    filter(trait %in% fw_plot_traits) %>%
+    mutate(trait = factor(trait, levels = fw_plot_traits))
+  
+  # How many columns? Keep 3 unless fewer traits remain
+  n_cols <- min(3, length(fw_plot_traits))
+  
+  p_fw <- ggplot(fw_plot, aes(x = b, fill = b_class)) +
+    geom_histogram(bins = 20, color = "white", linewidth = 0.3) +
+    geom_vline(xintercept = 1, linetype = "dashed",
+               color = "grey30", linewidth = 0.7) +
+    facet_wrap(~ trait, scales = "free_x",   # free x only — keep y comparable
+               ncol = n_cols) +
+    scale_fill_manual(
+      values = c(
+        "Stable / low-input adapted"     = "#2C7BB6",
+        "Average stability"               = "#FFFFBF",
+        "Responsive / high-input adapted" = "#D7191C"
+      ),
+      name = "Stability class"
+    ) +
+    labs(
+      title    = "Finlay-Wilkinson regression slope distribution",
+      subtitle = paste0("Dashed line = b = 1 (average stability) | ",
+                        "Traits with negligible G\u00D7E excluded"),
+      x = "Regression slope (b)",
+      y = "Count"
+    ) +
+    theme_bw(base_size = 10) +
+    theme(
+      strip.background = element_rect(fill = "#F0F0F0"),
+      legend.position  = "top",
+      plot.title       = element_text(face = "bold")
+    )
+  
+  ggsave("Results/Fig3.4b_FW_slope_distribution.png", p_fw,
+         width = 4 * n_cols, height = 3 * ceiling(length(fw_plot_traits) / n_cols),
+         dpi = 300)
+  cat("Fig 3.4b saved —", length(fw_plot_traits), "traits plotted\n")
+}
 
 # ── Fig 3.4c: Mean performance vs. WAASB (yield, per env) --------------------
 stab_df <- read.csv("Results/stability_indices_YLD.csv") %>%

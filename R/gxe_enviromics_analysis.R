@@ -79,9 +79,9 @@ best_model  <- read.csv("Results/best_model_selection.csv",     stringsAsFactors
 # Select best-model BLUPs per trait × env
 blups_best_long <- bind_rows(
   blups_SpATS %>% semi_join(best_model %>% filter(best_model == "SpATS"),
-                             by = c("trait", "env")),
+                            by = c("trait", "env")),
   blups_GIBD  %>% semi_join(best_model %>% filter(best_model == "GIBD"),
-                             by = c("trait", "env"))
+                            by = c("trait", "env"))
 )
 
 # ── 1d. Release year lookup ---------------------------------------------------
@@ -175,20 +175,35 @@ for (tr in traits) {
 
 fw_results <- list()
 
-finlay_wilkinson <- function(df) {
-  # df must have columns: genotype, env, BLUP
-  # Returns a data frame with one row per genotype:
-  #   mean, b (slope), s2d (deviation MS), r2, p_slope
+finlay_wilkinson <- function(df, min_Ij_sd = 0.01, max_b = 10) {
+  # df must have columns: genotype, env, BLUP, trait
+  #
+  # Guards against degenerate slopes:
+  #   min_Ij_sd : minimum SD of environment indices required to attempt
+  #               regression. If the four environments produce nearly
+  #               identical trait means (SD of I_j < this threshold),
+  #               the slope is mathematically undefined — skip the trait.
+  #   max_b     : slopes with |b| > max_b are flagged as unreliable
+  #               (numerical artefact of near-zero I_j variance) and
+  #               set to NA so they don't pollute the plot or summaries.
   
   grand_mean <- mean(df$BLUP, na.rm = TRUE)
   
-  # Environment index I_j = mean of all genotypes in env j − grand mean
+  # Environment index I_j = mean of all genotypes in env j minus grand mean
   env_index <- df %>%
     group_by(env) %>%
     summarise(I_j = mean(BLUP, na.rm = TRUE) - grand_mean, .groups = "drop")
   
-  df <- df %>% left_join(env_index, by = "env")
+  # Guard: if environments barely differ for this trait, FW is meaningless
+  Ij_sd <- sd(env_index$I_j, na.rm = TRUE)
+  if (is.na(Ij_sd) || Ij_sd < min_Ij_sd) {
+    message("  [FW] Skipping — environment index SD = ", round(Ij_sd, 6),
+            " (< ", min_Ij_sd, "). Trait has negligible E main effect; ",
+            "FW regression is not estimable.")
+    return(NULL)
+  }
   
+  df    <- df %>% left_join(env_index, by = "env")
   n_env <- length(unique(df$env))
   
   results <- df %>%
@@ -196,28 +211,42 @@ finlay_wilkinson <- function(df) {
     group_modify(function(g, key) {
       if (sum(!is.na(g$BLUP)) < 3) {
         return(data.frame(mean_BLUP = NA, b = NA, s2d = NA, r2 = NA,
-                          p_slope = NA, stringsAsFactors = FALSE))
+                          p_slope = NA, reliable = FALSE,
+                          stringsAsFactors = FALSE))
       }
-      lm_fw  <- lm(BLUP ~ I_j, data = g)
-      sm     <- summary(lm_fw)
-      b      <- coef(lm_fw)[["I_j"]]
-      r2     <- sm$r.squared
-      p_slp  <- coef(sm)[2, 4]
-      # Deviation MS = residual SS / (n_env - 2)
-      s2d    <- sum(resid(lm_fw)^2) / max(1, n_env - 2)
+      lm_fw <- lm(BLUP ~ I_j, data = g)
+      sm    <- summary(lm_fw)
+      b     <- coef(lm_fw)[["I_j"]]
+      r2    <- sm$r.squared
+      p_slp <- coef(sm)[2, 4]
+      s2d   <- sum(resid(lm_fw)^2) / max(1, n_env - 2)
+      
+      # Flag slopes that exploded due to residual near-zero I_j variance
+      reliable <- !is.na(b) && abs(b) <= max_b
+      
       data.frame(mean_BLUP = mean(g$BLUP, na.rm = TRUE),
-                 b = b, s2d = s2d, r2 = r2, p_slope = p_slp,
+                 b         = ifelse(reliable, b, NA_real_),
+                 s2d       = s2d,
+                 r2        = ifelse(reliable, r2,    NA_real_),
+                 p_slope   = ifelse(reliable, p_slp, NA_real_),
+                 reliable  = reliable,
                  stringsAsFactors = FALSE)
     }) %>%
     ungroup() %>%
     mutate(
-      trait        = unique(df$trait),
-      b_class      = case_when(
-        b < 0.8              ~ "Stable / low-input adapted",
-        b > 1.2              ~ "Responsive / high-input adapted",
-        TRUE                 ~ "Average stability"
+      trait   = unique(df$trait),
+      b_class = case_when(
+        is.na(b) ~ "Unreliable",
+        b <  0.8 ~ "Stable / low-input adapted",
+        b >  1.2 ~ "Responsive / high-input adapted",
+        TRUE     ~ "Average stability"
       )
     )
+  
+  n_unreliable <- sum(!results$reliable, na.rm = TRUE)
+  if (n_unreliable > 0)
+    message("  [FW] ", n_unreliable, " genotype(s) had |b| > ", max_b,
+            " and were set to NA.")
   
   return(results)
 }
@@ -429,6 +458,7 @@ cat("Climate data saved:", nrow(climate_daily), "daily records\n")
 # Define approximate phenological windows per environment
 # Adjust these dates to match your actual sowing / harvest calendar
 
+#dates
 pheno_windows <- data.frame(
   site        = c("Clavet","Clavet","Hunter","Hunter"),
   trial_year  = c(2024,  2025,  2024,  2025),
