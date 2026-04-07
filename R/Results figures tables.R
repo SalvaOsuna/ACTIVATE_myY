@@ -478,6 +478,141 @@ Fig3 <- p_violin + p_cor+
 ggsave("Figures/Fig3_trait variation.png", Fig3,
        width = 9, height = 5, dpi = 600)
 
+# ── Fig 3.3c: PCA with pheno traits  ------------------------------------------
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggrepel)
+library(tibble)
+
+# 1. Pivot the long BLUP data into a wide matrix
+blups_wide <- combined_blups %>%
+  select(genotype, trait, BLUP_combined) %>%
+  pivot_wider(names_from = trait, values_from = BLUP_combined) %>%
+  column_to_rownames("genotype")
+
+# 2. FIX: Impute missing values and remove zero-variance columns
+blups_wide_clean <- blups_wide %>%
+  # Impute NAs with the column (trait) mean so we don't lose the genotype
+  mutate(across(everything(), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .))) %>%
+  # Filter out any trait that still has zero variance (just in case)
+  select(where(~ var(., na.rm = TRUE) > 0))
+
+# Print a message if any columns were dropped due to zero variance
+dropped_cols <- setdiff(colnames(blups_wide), colnames(blups_wide_clean))
+if(length(dropped_cols) > 0) {
+  cat("Dropped due to zero variance:", paste(dropped_cols, collapse = ", "), "\n")
+}
+
+# 3. Run the PCA safely!
+trait_pca <- prcomp(blups_wide_clean, scale. = TRUE)
+
+# Calculate percentage of variance explained
+pct_var <- round(100 * trait_pca$sdev^2 / sum(trait_pca$sdev^2), 1)
+
+# 3. Extract Genotype Scores (the points)
+geno_scores <- as.data.frame(trait_pca$x[, 1:2]) %>%
+  rownames_to_column("genotype")
+
+# Extract the release year metadata so we can color the points by age
+geno_meta <- combined_blups %>% 
+  select(genotype, dev_year) %>% 
+  distinct()
+
+geno_scores <- geno_scores %>%
+  left_join(geno_meta, by = "genotype")
+
+# 4. Extract Trait Loadings (the arrows)
+# We calculate a scaling factor so the trait arrows stretch nicely across the plot 
+# alongside the genotype scores, rather than being clumped in the center.
+scale_f <- max(abs(geno_scores[, c("PC1", "PC2")])) / 
+  max(abs(trait_pca$rotation[, 1:2])) * 0.75
+
+trait_loads <- as.data.frame(trait_pca$rotation[, 1:2]) %>%
+  rownames_to_column("trait") %>%
+  mutate(PC1s = PC1 * scale_f, 
+         PC2s = PC2 * scale_f)
+
+# 5. Build the Biplot
+p_pca_traits <- ggplot() +
+  # Add zero-reference lines
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey70") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey70") +
+  
+  # Add Genotypes (Points colored by release year)
+  geom_point(data = geno_scores, 
+             aes(x = PC1, y = PC2, color = dev_year), 
+             size = 2.5, alpha = 0.8) +
+  scale_color_viridis_c(name = "Release\nYear", option = "plasma") + 
+  
+  # Add Traits (Arrows)
+  geom_segment(data = trait_loads,
+               aes(x = 0, y = 0, xend = PC1s, yend = PC2s),
+               arrow = arrow(length = unit(0.22, "cm"), type = "closed"),
+               color = "grey30", linewidth = 0.8) +
+  
+  # Add Trait Labels
+  geom_text_repel(data = trait_loads,
+                  aes(x = PC1s, y = PC2s, label = trait),
+                  color = "black", fontface = "bold", size = 3.5, 
+                  box.padding = 0.5, point.padding = 0.5) +
+  
+  # Formatting
+  labs(title = "Principal Component Analysis of Agronomic Traits",
+       subtitle = "Based on multi-environment combined BLUPs",
+       x = paste0("PC1 (", pct_var[1], "%)"),
+       y = paste0("PC2 (", pct_var[2], "%)")) +
+  theme_bw(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right")
+
+# Save the plot
+ggsave("Results/Fig3.c_Trait_PCA_Biplot.png", p_pca_traits, 
+       width = 8.5, height = 6.5, dpi = 600)
+
+#PC1 vs trait:
+library(dplyr)
+library(ggplot2)
+# install.packages("ggpubr") # if you don't have it installed from earlier
+library(ggpubr) 
+
+# 1. Isolate the Yield BLUPs from your combined dataset
+yld_data <- combined_blups %>%
+  filter(trait == "YLD") %>%
+  select(genotype, YLD_BLUP = BLUP_combined)
+
+# 2. Merge the PC1 scores with the Yield data
+# (Assuming 'geno_scores' from the PCA script is still in your environment)
+regression_data <- geno_scores %>%
+  select(genotype, PC1, dev_year) %>%
+  inner_join(yld_data, by = "genotype")
+
+# 3. Build the Regression Plot
+p_reg <- ggplot(regression_data, aes(x = PC1, y = YLD_BLUP)) +
+  # Add points colored by release year to keep the visual theme consistent
+  geom_point(aes(color = dev_year), size = 3, alpha = 0.8) +
+  scale_color_viridis_c(name = "Release\nYear", option = "plasma") +
+  
+  # Add the linear regression line with a confidence interval band
+  geom_smooth(method = "lm", color = "black", fill = "grey70", alpha = 0.4) +
+  
+  # Automatically calculate and print R-squared and p-value on the plot
+  stat_cor(method = "pearson", 
+           label.x.npc = "left", label.y.npc = "top", 
+           size = 4.5, fontface = "bold") +
+  
+  # Formatting
+  labs(title = "Relationship between PC1 and Grain Yield",
+       subtitle = "Assessing the primary axis of multi-trait variation",
+       x = "Principal Component 1 Score",
+       y = "Combined Yield BLUP (g/plot)") +
+  theme_bw(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+
+# 4. Save the plot
+ggsave("Results/Fig3.X_Regression_PC1_vs_YLD.png", p_reg, 
+       width = 7, height = 5.5, dpi = 600)
+
 # =============================================================================
 # SECTION 3.4 — GENOTYPE × ENVIRONMENT INTERACTION
 # =============================================================================

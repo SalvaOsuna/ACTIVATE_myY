@@ -292,12 +292,14 @@ for (tr in traits) {
     if (!is.null(mod_sp)) {
       h2_sp  <- cullis_H2_SpATS(mod_sp)
       preds  <- predict(mod_sp, which = "genotype")
+      pev_sp <- predict(mod_sp, which = "genotype")$standard.errors^2 # Extract PEVs from Stage 1 SpATS model
       blups_sp <- setNames(preds$predicted.values, preds$genotype)
       blups_SpATS_list[[env]] <- data.frame(
         genotype = names(blups_sp),
         BLUP     = as.numeric(blups_sp),
         env      = env,
         trait    = tr,
+        pev      = pev_sp,
         model    = "SpATS"
       )
       ed_spatial <- summary(mod_sp)$p.table.random    # effective dimensions
@@ -312,6 +314,10 @@ for (tr in traits) {
       h2_gi  <- cullis_H2_lme4(mod_gi, "genotype")
       re_gi  <- ranef(mod_gi)$genotype
       
+      # Extract PEVs from Stage 1 lme4 model
+      re_lme4  <- ranef(mod_gi, condVar = TRUE)$genotype
+      pev_lme4 <- attr(re_lme4, "postVar")[1, 1, ]
+      
       #Calculate the grand mean of the trait for this specific environment
       grand_mean <- mean(d_env[[tr]], na.rm = TRUE)
       
@@ -323,6 +329,7 @@ for (tr in traits) {
         BLUP     = as.numeric(blups_gi),
         env      = env,
         trait    = tr,
+        pev      = pev_lme4,
         model    = "GIBD"
       )
     } else {
@@ -381,8 +388,8 @@ best_model_selection <- H2_master %>%
       is.na(H2_SpATS) & is.na(H2_GIBD) ~ "none",
       is.na(H2_SpATS)  ~ "GIBD",
       is.na(H2_GIBD)   ~ "SpATS",
-      delta_H2 >=  0.02 ~ "SpATS",
-      delta_H2 <= -0.02 ~ "GIBD",
+      delta_H2 >=  0.05 ~ "SpATS",
+      delta_H2 <= -0.05 ~ "GIBD",
       TRUE              ~ "SpATS"   # tie → prefer SpATS
     )
   )
@@ -401,6 +408,7 @@ fit_stage2 <- function(blup_df, trait_name) {
   tryCatch({
     mod2 <- lmer(BLUP ~ (1 | genotype) + env,
                  data    = blup_df,
+                 weights = 1 / pev, #inverse prediction error variance (PEV)
                  control = lmerControl(optimizer = "bobyqa"))
     
     # Extract the random deviations for the genotypes
@@ -555,6 +563,7 @@ all_blups_wide <- bind_rows(
   bind_rows(lapply(results_list, function(x) x$blups_SpATS)),
   bind_rows(lapply(results_list, function(x) x$blups_GIBD))
 ) %>%
+  select(!pev) |>
   pivot_wider(names_from = model, values_from = BLUP)
 
 p_rho <- all_blups_wide %>%
