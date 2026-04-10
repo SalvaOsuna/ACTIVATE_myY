@@ -97,6 +97,7 @@ cat("Traits :", paste(traits, collapse=", "), "\n")
 cat("Envs   :", paste(envs,   collapse=", "), "\n")
 
 
+
 # ── 2. AMMI ANALYSIS ──────────────────────────────────────────────────────────
 # Uses metan::performs_ammi() — works on a two-way table (genotype × env)
 # Requires: genotype, env, rep, trait columns in long format
@@ -131,19 +132,23 @@ for (tr in traits) {
 
 
 # ── 2b. EXTRACT AMMI VARIANCE PARTITIONING ────────────────────────────────────
-# Extracts all placeholder values needed for Results section 3.4:
-#   - % SS for G, E, and GxE relative to model SS (G + E + GxE)
-#   - % of GxE SS explained by IPCA1 and IPCA2 individually
-#   - Cumulative % explained by IPCA1 + IPCA2 jointly
-#   - Gollob F-test p-values for IPCA1 and IPCA2
+# The performs_ammi() ANOVA table is a plain data frame where sources of
+# variation are in a character column called "Source", NOT as row names.
+# Column names are "Sum Sq", "Proportion", "Accumulated", and "Pr(>F)".
 #
-# Object structure from performs_ammi():
-#   ammi_results[[trait]]$model[[trait]]$ANOVA  → SS/MS/F/p per source
-#   ammi_results[[trait]]$model[[trait]]$PCA    → eigenvalues & % per IPCA
+# Actual structure (verified from output):
+#   ammi_results[[trait]][["value"]][["ANOVA"]]
 #
-# ANOVA row names : "GEN", "ENV", "REP(ENV)", "GEI", "Residuals"
-# PCA  row names  : "PC1", "PC2", "PC3", ...
-# PCA  col names  : "Eigenvalue", "VarianceExplained", "Accumulative", "F.value", "Pr.F"
+#   Source        Df   Sum Sq   Mean Sq   F value   Pr(>F)   Proportion  Accumulated
+#   ENV            3   90935    30311     2660      0            NA          NA
+#   REP(ENV)     188    2142       11        9      0            NA          NA
+#   GEN          103   19131      185      155      0            NA          NA
+#   GEN:ENV      309    2503        8        6      0            NA          NA
+#   PC1          105    3315       31       26      0            55.6        55.6
+#   PC2          103    1900       18       15      0            31.9        87.5
+#   PC3          101     748        7        6      0            12.5       100.0
+#   Residuals   8033    9592        1       NA      NA           NA          NA
+#   Total        ...
 
 ammi_summary_list <- list()
 
@@ -152,37 +157,58 @@ for (tr in traits) {
   
   tryCatch({
     
-    anova_tbl <- ammi_results[[tr]]$model[[tr]]$ANOVA
-    pca_tbl   <- ammi_results[[tr]]$model[[tr]]$PCA
+    # Correct path into the object
+    anova_tbl <- ammi_results[[tr]][["value"]][["ANOVA"]]
     
-    # ── Variance partitioning (% of G + E + GxE model SS) -------------------
-    ss_G   <- anova_tbl["GEN", "SS"]
-    ss_E   <- anova_tbl["ENV", "SS"]
-    ss_GEI <- anova_tbl["GEI", "SS"]
-    ss_mod <- ss_G + ss_E + ss_GEI          # excludes REP(ENV) and Residuals
+    # ── Helper: pull one value by filtering the Source column ----------------
+    ss <- function(source_name) {
+      row <- anova_tbl[anova_tbl$Source == source_name, , drop = FALSE]
+      if (nrow(row) == 0) stop("Source '", source_name, "' not found")
+      row[["Sum Sq"]]
+    }
+    
+    prop <- function(source_name, col = "Proportion") {
+      row <- anova_tbl[anova_tbl$Source == source_name, , drop = FALSE]
+      if (nrow(row) == 0) stop("Source '", source_name, "' not found")
+      row[[col]]
+    }
+    
+    pval <- function(source_name) {
+      row <- anova_tbl[anova_tbl$Source == source_name, , drop = FALSE]
+      if (nrow(row) == 0) stop("Source '", source_name, "' not found")
+      row[["Pr(>F)"]]
+    }
+    
+    fmt_p <- function(p) {
+      if (is.na(p)) return("NA")
+      ifelse(p < 0.001, "< 0.001",
+             ifelse(p < 0.01,  "< 0.01",
+                    ifelse(p < 0.05,  "< 0.05",
+                           paste0("= ", round(p, 3)))))
+    }
+    
+    # ── Variance partitioning: % of (G + E + GxE) model SS ------------------
+    ss_G   <- ss("GEN")
+    ss_E   <- ss("ENV")
+    ss_GEI <- ss("GEN:ENV")
+    ss_mod <- ss_G + ss_E + ss_GEI
     
     pct_G   <- round(ss_G   / ss_mod * 100, 1)
     pct_E   <- round(ss_E   / ss_mod * 100, 1)
     pct_GEI <- round(ss_GEI / ss_mod * 100, 1)
     
-    # ── IPCA1 ----------------------------------------------------------------
-    pct_ipca1   <- round(pca_tbl["PC1", "VarianceExplained"], 1)
-    p_ipca1_raw <- pca_tbl["PC1", "Pr.F"]
-    p_ipca1_fmt <- ifelse(p_ipca1_raw < 0.001, "< 0.001",
-                          ifelse(p_ipca1_raw < 0.01,  "< 0.01",
-                                 ifelse(p_ipca1_raw < 0.05,  "< 0.05",
-                                        paste0("= ", round(p_ipca1_raw, 3)))))
+    # ── IPCA1: % of GxE SS and Gollob p-value --------------------------------
+    pct_ipca1   <- round(prop("PC1", "Proportion"), 1)
+    p_ipca1_raw <- pval("PC1")
+    p_ipca1_fmt <- fmt_p(p_ipca1_raw)
     
-    # ── IPCA2 ----------------------------------------------------------------
-    pct_ipca2   <- round(pca_tbl["PC2", "VarianceExplained"], 1)
-    p_ipca2_raw <- pca_tbl["PC2", "Pr.F"]
-    p_ipca2_fmt <- ifelse(p_ipca2_raw < 0.001, "< 0.001",
-                          ifelse(p_ipca2_raw < 0.01,  "< 0.01",
-                                 ifelse(p_ipca2_raw < 0.05,  "< 0.05",
-                                        paste0("= ", round(p_ipca2_raw, 3)))))
+    # ── IPCA2: % of GxE SS and Gollob p-value --------------------------------
+    pct_ipca2   <- round(prop("PC2", "Proportion"), 1)
+    p_ipca2_raw <- pval("PC2")
+    p_ipca2_fmt <- fmt_p(p_ipca2_raw)
     
-    # ── Joint IPCA1 + IPCA2 cumulative % of GxE SS --------------------------
-    pct_joint <- round(pca_tbl["PC2", "Accumulative"], 1)
+    # ── IPCA1 + IPCA2 joint (Accumulated column at PC2 row) ------------------
+    pct_joint <- round(prop("PC2", "Accumulated"), 1)
     
     ammi_summary_list[[tr]] <- data.frame(
       trait       = tr,
@@ -199,7 +225,7 @@ for (tr in traits) {
       stringsAsFactors = FALSE
     )
     
-    # Print ready-to-paste sentence for the Results section
+    # ── Print ready-to-paste sentence for Results section 3.4 ----------------
     cat(sprintf(
       "\n── AMMI variance partitioning: %s ──
   G = %.1f%%  |  E = %.1f%%  |  GxE = %.1f%%
@@ -215,19 +241,17 @@ for (tr in traits) {
     
   }, error = function(e) {
     message("Extraction failed for ", tr, ": ", e$message)
-    message("  Debug with: str(ammi_results[['", tr,
-            "']]$model[['", tr, "']]$ANOVA)")
-    message("  and:        str(ammi_results[['", tr,
-            "']]$model[['", tr, "']]$PCA)")
+    message("  Debug: run  ammi_results[['", tr, "']][['value']][['ANOVA']]",
+            "  to inspect Source names and column names in your data.")
   })
 }
 
-# Save full summary table — use this to fill all placeholders in Section 3.4
+# Save full summary table
 ammi_summary <- bind_rows(ammi_summary_list)
 write.csv(ammi_summary, "Results/AMMI_variance_partitioning.csv",
           row.names = FALSE)
-cat("\nResults/AMMI_variance_partitioning.csv written\n")
-
+cat("\nResults/AMMI_variance_partitioning.csv written —",
+    nrow(ammi_summary), "traits\n")
 
 # ── 3. GGE BIPLOT ─────────────────────────────────────────────────────────────
 # gge() in metan — shows which-won-where and mega-environment structure
