@@ -420,7 +420,7 @@ p_violin <- dat %>%
                color = "grey30", fill = "white", alpha = 0.8) +
   facet_wrap(~ trait, scales = "free_y", nrow = 3) +
   scale_fill_manual(values = env_colors, name = "Environment") +
-  labs(title = "Phenotypic distribution per trait and environment",
+  labs(#title = "Phenotypic distribution per trait and environment",
        x = NULL, y = "Phenotypic value") +
   theme_bw(base_size = 12) +
   theme(axis.text.x      = element_text(angle = 35, hjust = 1, size = 9),
@@ -469,14 +469,14 @@ ggsave("Results/Fig3.3b_phenotypic_correlations.png", p_cor,
 cat("Section 3.3 figures saved\n")
 
 #combine figures together
-Fig3 <- p_violin + p_cor+ 
+Fig3 <- p_violin + (p_cor/p_pca_traits)+ 
   plot_layout(tag_level = 'new',widths = c(1.5, 1)) +
-  plot_annotation(tag_levels = list(c('a)', 'b)'))) & 
+  plot_annotation(tag_levels = list(c('a)', 'b)', 'c)'))) & 
   theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 2, unit = "pt"))
 
 
 ggsave("Figures/Fig3_trait variation.png", Fig3,
-       width = 9, height = 5, dpi = 600)
+       width = 9, height = 6, dpi = 600)
 
 # ── Fig 3.3c: PCA with pheno traits  ------------------------------------------
 library(dplyr)
@@ -541,9 +541,9 @@ p_pca_traits <- ggplot() +
   
   # Add Genotypes (Points colored by release year)
   geom_point(data = geno_scores, 
-             aes(x = PC1, y = PC2, color = dev_year), 
-             size = 2.5, alpha = 0.8) +
-  scale_color_viridis_c(name = "Release\nYear", option = "plasma") + 
+             aes(x = PC1, y = PC2), # ,color = dev_year
+             size = 2.5, alpha = 0.8, colour = "grey") +
+  #scale_color_viridis_c(name = "Release\nYear", option = "plasma") + 
   
   # Add Traits (Arrows)
   geom_segment(data = trait_loads,
@@ -558,8 +558,8 @@ p_pca_traits <- ggplot() +
                   box.padding = 0.5, point.padding = 0.5) +
   
   # Formatting
-  labs(title = "Principal Component Analysis of Agronomic Traits",
-       subtitle = "Based on multi-environment combined BLUPs",
+  labs(#title = "Principal Component Analysis of Agronomic Traits",
+       #subtitle = "Based on multi-environment combined BLUPs",
        x = paste0("PC1 (", pct_var[1], "%)"),
        y = paste0("PC2 (", pct_var[2], "%)")) +
   theme_bw(base_size = 11) +
@@ -664,6 +664,65 @@ for (tr in traits) {
          width = 6, height = 14, dpi = 300)
 }
 
+
+# =============================================================================
+# SECTION 3.4 — GENOTYPE × ENVIRONMENT INTERACTION (STACKED HEATMAPS)
+# =============================================================================
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Load data (assuming blups_long and release_yr are already in your environment)
+# Define which traits you want to stack (e.g., Yield, Protein, Days to Flowering)
+traits_to_stack <- c("YLD", "PRT", "VegP") 
+
+# 1. Prepare and scale all data simultaneously
+stacked_data <- blups_long %>%
+  filter(trait %in% traits_to_stack) %>%
+  inner_join(release_yr, by = "genotype") %>%
+  
+  # Group by trait and environment to scale BLUPs appropriately within each site-year
+  group_by(trait, env) %>%
+  mutate(z_BLUP = as.numeric(scale(BLUP))) %>%
+  ungroup() %>%
+  
+  # Factor the traits to control the top-to-bottom order in the plot
+  mutate(trait = factor(trait, levels = traits_to_stack),
+         # Order genotypes left-to-right by release year
+         genotype = reorder(genotype, dev_year))
+
+# 2. Build the stacked, rotated heatmap
+p_stacked_hm <- ggplot(stacked_data, aes(x = genotype, y = env, fill = z_BLUP)) +
+  geom_tile(color = "white", linewidth = 0.15) +
+  scale_fill_gradient2(low = "#D7191C", mid = "white", high = "#2C7BB6",
+                       midpoint = 0, name = "Std. BLUP") +
+  
+  # Stack the plots vertically (ncol = 1) based on the trait
+  facet_wrap(~ trait, ncol = 1) +
+  
+  labs(#title    = "Genotype × Environment Interaction",
+       #subtitle = "Genotypes ordered left-to-right by release year",
+       x =NULL, # "Genotype (ordered by release year)", 
+       y = NULL)+#"Environment") +
+  
+  theme_bw(base_size = 10) +
+  theme(
+    # Rotate X-axis text 90 degrees and make it small so all 100 fit
+    axis.text.x      = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 5),
+    axis.text.y      = element_text(size = 9),
+    panel.grid       = element_blank(),
+    strip.background = element_rect(fill = "#F0F0F0"),
+    strip.text       = element_text(face = "bold"),
+    plot.title       = element_text(face = "bold"),
+    legend.position  = "none",         #"Bottom" if Move legend to bottom for wide plots
+    legend.key.width = unit(1.5, "cm")   # Stretch the legend bar slightly
+  )
+
+# Save the wide plot
+ggsave("Results/Fig3.4a_GxE_heatmap_stacked.png", p_stacked_hm,
+       width = 14, height = 8, dpi = 600)
+
 # ── Fig 3.4b: Finlay-Wilkinson b distribution per trait ----------------------
 # Traits where all environments produced nearly identical means (SD of I_j
 # below the min_Ij_sd threshold) return NULL from finlay_wilkinson() and are
@@ -689,7 +748,8 @@ if (length(fw_plot_traits) == 0) {
 } else {
   fw_plot <- fw_all %>%
     filter(trait %in% fw_plot_traits) %>%
-    mutate(trait = factor(trait, levels = fw_plot_traits))
+    mutate(trait = factor(trait, levels = fw_plot_traits)) |>
+    rename()
   
   # How many columns? Keep 3 unless fewer traits remain
   n_cols <- min(3, length(fw_plot_traits))
@@ -702,24 +762,24 @@ if (length(fw_plot_traits) == 0) {
                ncol = n_cols) +
     scale_fill_manual(
       values = c(
-        "Stable / low-input adapted"     = "#2C7BB6",
-        "Average stability"               = "#FFFFBF",
-        "Responsive / high-input adapted" = "#D7191C"
+        "Stable"     = "#2C7BB6",
+        "Average"               = "#FFFFBF",
+        "Responsive" = "#D7191C"
       ),
       name = "Stability class"
     ) +
     labs(
-      title    = "Finlay-Wilkinson regression slope distribution",
-      subtitle = paste0("Dashed line = b = 1 (average stability) | ",
-                        "Traits with negligible G\u00D7E excluded"),
+      #title    = "Finlay-Wilkinson regression slope distribution",
+      #subtitle = paste0("Dashed line = b = 1 (average stability) | ",
+      #                  "Traits with negligible G\u00D7E excluded"),
       x = "Regression slope (b)",
-      y = "Count"
+      y = NULL#"Count"
     ) +
     theme_bw(base_size = 10) +
     theme(
       strip.background = element_rect(fill = "#F0F0F0"),
       legend.position  = "top",
-      plot.title       = element_text(face = "bold")
+      plot.margin = margin(t = 0, r = 0, b = 0, l = 0)
     )
   
   ggsave("Results/Fig3.4b_FW_slope_distribution.png", p_fw,
@@ -737,7 +797,7 @@ if ("WAASB" %in% names(stab_df) && "Y" %in% names(stab_df)) {
   grand_mean_yield <- mean(stab_df$Y, na.rm = TRUE)
   grand_waasb      <- mean(stab_df$WAASB, na.rm = TRUE)
   
-  p_quad <- ggplot(stab_df,
+  p_quad_yld <- ggplot(stab_df,
                    aes(x = WAASB, y = Y, color = dev_year)) +
     geom_point(size = 2.5, alpha = 0.85) +
     geom_vline(xintercept = grand_waasb,
@@ -755,15 +815,31 @@ if ("WAASB" %in% names(stab_df) && "Y" %in% names(stab_df)) {
     annotate("text", x = Inf, y = Inf,
              label = "High mean\nLow stability", hjust = 1.1,
              vjust = 1.3, size = 3, color = "#D7191C", fontface = "italic") +
-    labs(title    = "Mean performance vs. stability (WAASB) — yield",
-         subtitle = "Dashed lines = grand means | Colour = release year",
-         x = "WAASB (lower = more stable)",
+    labs(#title    = "Mean performance vs. stability (WAASB) — yield",
+         #subtitle = "Dashed lines = grand means | Colour = release year",
+         x = NULL,
          y = "Mean yield (g plot\u207B\u00B9)") +
     theme_bw(base_size = 11) +
-    theme(plot.title = element_text(face = "bold"))
+    theme(plot.title = element_text(face = "bold"),
+          legend.position  = "right",
+          legend.margin = margin(t = 0, r = 0, b = 0, l = 0),
+          legend.key.width = unit(0.3, 'cm'), # Key box size
+          legend.key.height = unit(1.5, 'cm'),
+          legend.title = element_text(size = 7), # Title font size
+          legend.text = element_text(size = 7)) # Text font size)
   ggsave("Results/Fig3.4c_mean_vs_WAASB_yield.png", p_quad,
          width = 9, height = 7, dpi = 300)
 }
+
+#combine figures together
+Fig4 <- p_stacked_hm / (free(p_fw)|free((p_quad_yld/p_quad_vegp )+ plot_layout(guides = 'collect')))+
+  plot_layout(tag_level = 'new',heights = c(1, 2.5), widths = c(1.5,1)) +
+  plot_annotation(tag_levels = list(c('a)', 'b)', 'c)', 'd)'))) & 
+  theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 2, unit = "pt"))
+
+
+ggsave("Figures/Fig4_stability.png", Fig4,
+       width = 9, height = 10, dpi = 600)
 
 #??? ── Table 3.4: Stability indices summary (top 20 genotypes by MGIDI) ---------
 mgidi <- read.csv("Results/MGIDI_multi_trait_ranking.csv") %>%
