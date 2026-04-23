@@ -192,11 +192,11 @@ pacman::p_load(tidyverse, sf, gstat, ggplot2, viridis, scales,
                patchwork, ggmap, ggnewscale, png)
 
 # ── Google Maps API key ────────────────────────────────────
-google_API <- read.csv("data/Google Map API key.txt", header = F)
-register_google(key = google_API[1])
+google_API <- read.delim("data/Google Map API key.txt")
+register_google(key = google_API)
 
 # --- 2. Load & Clean Data ---
-df <- read.csv("data/Rel_Electro_Hunter2024.csv", header = TRUE)
+df <- read.csv("data/Rel_Electro_Clavet2024.csv", header = TRUE)
 
 colnames(df) <- c("Reading", "Seconds_UTC", "Lon", "Lat", "Elevation",
                   "CV_1.0m", "CV_0.5m", "IV_1.0m", "IV_0.5m")
@@ -242,7 +242,7 @@ basemap_gg <- get_googlemap(
 )
 
 # Save the raw basemap as PNG for reuse (no re-fetching needed later)
-basemap_path <- "Results/Electroconductivity/Hunter2024_satellite_basemap.png"
+basemap_path <- "Results/Electroconductivity/Clavet2024_satellite_basemap.png"
 ggmap(basemap_gg) +
   theme_void()
 ggsave(basemap_path, width = 8, height = 8, dpi = 300)
@@ -369,7 +369,7 @@ for (trait in traits) {
   fig <- p_heat + p_raw +
     plot_layout(guides = 'collect') +
     plot_annotation(
-      title    = sprintf("Hunter 2024 EM38 MK2 — %s", trait_labels[[trait]]),
+      title    = sprintf("Clavet 2024 EM38 MK2 — %s", trait_labels[[trait]]),
       subtitle = "Google Maps Satellite | IDW (idp = 2, nmax = 12) | Outliers: k = 3 × IQR",
       caption  = "Map data © Google",
       theme    = theme(
@@ -379,7 +379,7 @@ for (trait in traits) {
       )
     )
   
-  fname <- sprintf("Results/Electroconductivity/Hunter2024_%s_googlesat.png", gsub("\\.", "", trait))
+  fname <- sprintf("Results/Electroconductivity/Clavet2024_%s_googlesat.png", gsub("\\.", "", trait))
   ggsave(fname, plot = fig, width = 14, height = 7, dpi = 300)
   cat(sprintf("  Saved: %s\n", fname))
 }
