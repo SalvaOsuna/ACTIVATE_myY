@@ -140,6 +140,8 @@ dat <- dat |>
   #rename Rep by Rep_combo
   rename(Rep_combo = Rep)
 
+#write.csv(dat, "data/ACTIVATE_lentils_myYraw_rep_gen.csv")
+
 # ── Factor conversions --------------------------------------------------------
 dat <- dat %>%
   mutate(
