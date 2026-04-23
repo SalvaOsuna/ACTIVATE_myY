@@ -192,7 +192,8 @@ pacman::p_load(tidyverse, sf, gstat, ggplot2, viridis, scales,
                patchwork, ggmap, ggnewscale, png)
 
 # ── Google Maps API key ────────────────────────────────────
-register_google(key = "AIzaSyDmfdksq2lHa2e5wqe7OWEW3rZ3-917K50")
+google_API <- read.delim("data/Google Map API key.txt")
+register_google(key = google_API)
 
 # --- 2. Load & Clean Data ---
 df <- read.csv("data/Rel_Electro_Clavet2024.csv", header = TRUE)
