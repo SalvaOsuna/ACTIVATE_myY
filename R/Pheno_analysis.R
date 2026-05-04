@@ -7,10 +7,12 @@ library(reshape2)
 
 # Load data
 ACTIVATE_lentils_myYraw <- read_csv("data/ACTIVATE_lentils_myYraw.csv")
+ACTIVATE_lentils_myYraw <- read_csv("data/ACTIVATE_wheat_myYraw_rep_gen.csv")
 
 # Define environments and traits (adjust if needed)
-envs <- c("Clavet_2024", "Hunter_2024", "Clavet_2025", "Hunter_2025")
-traits <- c("DTE", "DTF", "DTM", "lodging")
+envs <- c("Clavet2024", "Hunter2024", "Clavet2025", "Hunter2025")
+traits <- c("DTE", "DTF", "DTM", "lodging", "YLD", "PRT")
+traits <- "Y.ADJ"
 
 # ---------- 1) quick diagnostics on classes ----------
 message("Column classes (first 30 columns):")
@@ -87,14 +89,18 @@ for (env in envs) {
       warning("Trait ", trait, " in env ", env, " is not numeric after conversion. Skipping.")
       next
     }
-    
+    nrow_val <- max(data_env$Row)
+    ncol_val <- max(data_env$Col)
+    # Number of knots: rule of thumb = min(round(n/4), 35)
+    nseg_row <- min(round(nrow_val / 4), 35)
+    nseg_col <- min(round(ncol_val / 4), 35)
     message("Fitting SpATS: ", env, " - ", trait)
     fit <- tryCatch(
       SpATS(
         response = trait,
         genotype.as.random = TRUE,
         genotype = "Lentil",
-        spatial = ~ PSANOVA(Row, Col, nseg = c(15, 8)),
+        spatial = ~ PSANOVA(Row, Col, nseg = c(nseg_row, nseg_col)),
         data = data_env,
         fixed = ~ Block,
         control = list(tolerance = 1e-03)
@@ -163,6 +169,9 @@ genotype_means_and_blups <- bind_rows(geno_results)
 write.csv(spatial_variation_lentil, "spatial_variation_lentil.csv", row.names = FALSE)
 write.csv(genotype_means_and_blups, "genotype_means_and_blups.csv", row.names = FALSE)
 
+spatial_variation_lentil <- read.csv("data/spatial_variation_lentil.csv")
+genotype_means_and_blups <- read.csv("data/genotype_means_and_blups.csv")
+  
 # Quick look
 head(spatial_variation_lentil)
 head(genotype_means_and_blups)
@@ -197,7 +206,9 @@ standardized_dfs <- pmap_dfr(
 )
 
 # Create heatmaps using standardized values
-p <- ggplot(standardized_dfs |> filter(Trait %in% c("DTF","lodging")), aes(x = Row, y = Col, fill = Value_std)) +
+p <- ggplot(standardized_dfs |> filter(Trait %in% c("Y.ADJ"),
+                                       ENV %in% c("Hunter2025")), 
+            aes(x = Col, y = rev(Row), fill = Value_std)) +
   geom_tile() +  # Use tiles for heatmap
   scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
                        midpoint = 0,  # Midpoint at 0 for standardized data
@@ -212,7 +223,7 @@ p <- ggplot(standardized_dfs |> filter(Trait %in% c("DTF","lodging")), aes(x = R
     legend.position = "none",
     panel.grid = element_blank()  # Remove grid lines for clarity
   ) +
-  labs(x = "Row", y = "Column", 
+  labs(x = "Column", y = "Row", 
        title = "Spatial Trend Heatmaps by Trait and Location")
 
 
